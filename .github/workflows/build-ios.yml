@@ -85,7 +85,7 @@ jobs:
           APP="$RUNNER_TEMP/house-capture-build/Build/Products/Release-iphoneos/HouseCapture.app"
           test -d "$APP"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleSupportedPlatforms:0' "$APP/Info.plist")" = iPhoneOS
-          lipo -verify_arch arm64 "$APP/HouseCapture"
+          lipo "$APP/HouseCapture" -verify_arch arm64
           mkdir -p package/Payload output
           ditto "$APP" package/Payload/HouseCapture.app
           (cd package && /usr/bin/zip -q -r ../output/3D-Model-Anything-unsigned.ipa Payload)
