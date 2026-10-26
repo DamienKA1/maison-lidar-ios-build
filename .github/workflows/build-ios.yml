@@ -26,6 +26,30 @@ jobs:
           git -C source checkout --detach FETCH_HEAD
           test "$(git -C source rev-parse HEAD)" = "$SOURCE_REVISION"
 
+      - name: Make surface tuple types explicit for the hosted Swift compiler
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('source/apps/house-capture/HouseCapture/CoverageEngine.swift')
+          source = path.read_text()
+          old = '''      for (off, n, w, h, ax, ay) in [
+                  (y * d.y / 2, y, d.x, d.z, x, z),
+                  (z * d.z / 2, z, d.x, d.y, x, y), (-z * d.z / 2, -z, d.x, d.y, x, y),
+                  (x * d.x / 2, x, d.z, d.y, z, y), (-x * d.x / 2, -x, d.z, d.y, z, y),
+                ] {'''
+          new = '''      typealias Surface = (SIMD3<Float>, SIMD3<Float>, Float, Float, SIMD3<Float>, SIMD3<Float>)
+                var surfaces: [Surface] = []
+                surfaces.append((y * d.y / 2, y, d.x, d.z, x, z))
+                surfaces.append((z * d.z / 2, z, d.x, d.y, x, y))
+                surfaces.append((-z * d.z / 2, -z, d.x, d.y, x, y))
+                surfaces.append((x * d.x / 2, x, d.z, d.y, z, y))
+                surfaces.append((-x * d.x / 2, -x, d.z, d.y, z, y))
+                for (off, n, w, h, ax, ay) in surfaces {'''
+          assert source.count(old) == 1, 'The pinned source has changed; inspect before patching'
+          path.write_text(source.replace(old, new))
+          PY
+
       - name: Prepare the Apple build tools
         shell: bash
         run: |
@@ -66,6 +90,7 @@ jobs:
           ditto "$APP" package/Payload/HouseCapture.app
           (cd package && /usr/bin/zip -q -r ../output/3D-Model-Anything-unsigned.ipa Payload)
           printf 'Source: https://github.com/wesbos/3d-model-anything\nRevision: %s\nConfiguration: Release, iphoneos, unsigned\nApple signing is still required before installation.\n' "$SOURCE_REVISION" > output/build-info.txt
+          printf 'Build compatibility patch: explicit Surface tuple types in CoverageEngine.swift.\n' >> output/build-info.txt
           shasum -a 256 output/3D-Model-Anything-unsigned.ipa > output/SHA256SUMS.txt
           unzip -t output/3D-Model-Anything-unsigned.ipa | tail -n 1
 
