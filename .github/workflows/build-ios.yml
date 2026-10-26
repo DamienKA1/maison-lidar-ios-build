@@ -1,0 +1,78 @@
+name: Build 3D Model Anything for iPhone
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-unsigned-ipa:
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      SOURCE_REVISION: 31b2dc9da3fb541e501f2f0936e55b32afb70ee8
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - name: Fetch the exact public Wes Bos source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init source
+          git -C source remote add origin https://github.com/wesbos/3d-model-anything.git
+          git -C source config core.sparseCheckout true
+          git -C source sparse-checkout set apps/house-capture
+          git -C source fetch --depth=1 origin "$SOURCE_REVISION"
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "$SOURCE_REVISION"
+
+      - name: Prepare the Apple build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          if ! command -v xcodegen >/dev/null; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+
+      - name: Compile the Release app for a physical iPhone
+        working-directory: source/apps/house-capture
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodegen generate
+          xcodebuild -project HouseCapture.xcodeproj \
+            -scheme HouseCapture \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/house-capture-build" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            build
+
+      - name: Package an unsigned IPA for local signing on Windows
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/house-capture-build/Build/Products/Release-iphoneos/HouseCapture.app"
+          test -d "$APP"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleSupportedPlatforms:0' "$APP/Info.plist")" = iPhoneOS
+          lipo -verify_arch arm64 "$APP/HouseCapture"
+          mkdir -p package/Payload output
+          ditto "$APP" package/Payload/HouseCapture.app
+          (cd package && /usr/bin/zip -q -r ../output/3D-Model-Anything-unsigned.ipa Payload)
+          printf 'Source: https://github.com/wesbos/3d-model-anything\nRevision: %s\nConfiguration: Release, iphoneos, unsigned\nApple signing is still required before installation.\n' "$SOURCE_REVISION" > output/build-info.txt
+          shasum -a 256 output/3D-Model-Anything-unsigned.ipa > output/SHA256SUMS.txt
+          unzip -t output/3D-Model-Anything-unsigned.ipa | tail -n 1
+
+      - name: Keep the installable package for local signing
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: 3D-Model-Anything-iPhone-unsigned
+          path: output/
+          if-no-files-found: error
+          retention-days: 7
